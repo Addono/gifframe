@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# mov2gif — Convert terminal screen recordings (.mov) to optimised animated GIFs
+# gifframe — Convert terminal screen recordings into polished animated GIFs
 #
 # Produces macOS-style output: white background, rounded window corners,
 # and a soft drop shadow — sized to match a real macOS window chrome.
 #
-# Usage: mov2gif [OPTIONS] [FILE...]
+# Usage: gifframe [OPTIONS] [FILE...]
 #   FILE                 .mov files to convert (default: all *.mov in current dir)
 #   -q, --quality PRESET Quality preset: medium | high | xhigh | all (default: high)
 #   -h, --help           Show this help
@@ -451,7 +451,7 @@ main() {
     # ── banner ───────────────────────────────────────────────────────────────
     echo ""
     echo -e "${BLUE}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║       mov2gif  ·  terminal recorder      ║${NC}"
+    echo -e "${BLUE}║      gifframe  ·  terminal recorder      ║${NC}"
     echo -e "${BLUE}╚══════════════════════════════════════════╝${NC}"
     echo ""
     echo "  Files:   ${#mov_files[@]} file(s)"

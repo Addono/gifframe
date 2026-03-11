@@ -1,17 +1,17 @@
-# mov2gif
+# gifframe
 
 > Convert terminal screen recordings (`.mov`) into polished animated GIFs —
 > complete with macOS-style window chrome: rounded corners, white background,
 > and a soft drop shadow.
 
-[![CI](https://github.com/Addono/mov2gif/actions/workflows/ci.yml/badge.svg)](https://github.com/Addono/mov2gif/actions/workflows/ci.yml)
-[![Docker](https://ghcr.io/Addono/mov2gif)](https://github.com/Addono/mov2gif/pkgs/container/mov2gif)
+[![CI](https://github.com/Addono/gifframe/actions/workflows/ci.yml/badge.svg)](https://github.com/Addono/gifframe/actions/workflows/ci.yml)
+[![Docker](https://ghcr.io/Addono/gifframe)](https://github.com/Addono/gifframe/pkgs/container/gifframe)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="mov2gif demo — switching between Copilot modes" width="720" />
+  <img src="docs/demo.gif" alt="gifframe demo — switching between Copilot modes" width="720" />
 </p>
 
 ---
@@ -38,10 +38,10 @@
 
 ```bash
 # Convert all .mov files in the current directory
-docker run --rm -v "$(pwd):/work" ghcr.io/addono/mov2gif
+docker run --rm -v "$(pwd):/work" ghcr.io/addono/gifframe
 
 # Convert a specific file at extra-high quality
-docker run --rm -v "$(pwd):/work" ghcr.io/addono/mov2gif -q xhigh demo.mov
+docker run --rm -v "$(pwd):/work" ghcr.io/addono/gifframe -q xhigh demo.mov
 ```
 
 Output GIFs are written to `./gifs/` on your host machine.
@@ -50,11 +50,11 @@ Output GIFs are written to `./gifs/` on your host machine.
 
 ```bash
 # Clone and make the script executable
-git clone https://github.com/Addono/mov2gif.git
-chmod +x mov2gif/bin/mov2gif
+git clone https://github.com/Addono/gifframe.git
+chmod +x gifframe/bin/gifframe
 
 # Optional: add to PATH
-export PATH="$PATH:$(pwd)/mov2gif/bin"
+export PATH="$PATH:$(pwd)/gifframe/bin"
 ```
 
 **Dependencies** (install once):
@@ -67,13 +67,13 @@ export PATH="$PATH:$(pwd)/mov2gif/bin"
 
 ```bash
 # Convert all .mov files in the current directory
-mov2gif
+gifframe
 
 # Convert a specific file
-mov2gif recording.mov
+gifframe recording.mov
 
 # Pick a quality preset
-mov2gif -q xhigh demo.mov
+gifframe -q xhigh demo.mov
 ```
 
 ---
@@ -81,7 +81,7 @@ mov2gif -q xhigh demo.mov
 ## Usage
 
 ```
-mov2gif [OPTIONS] [FILE...]
+gifframe [OPTIONS] [FILE...]
 
 Arguments:
   FILE                   .mov file(s) to convert.
@@ -105,28 +105,28 @@ Options:
 
 ```bash
 # Convert every .mov in the current directory at the default (high) quality
-mov2gif
+gifframe
 
 # Convert one file
-mov2gif session.mov
+gifframe session.mov
 
 # High-fidelity render for a blog post
-mov2gif -q xhigh session.mov
+gifframe -q xhigh session.mov
 
 # Smaller file for a GitHub README
-mov2gif -q medium session.mov
+gifframe -q medium session.mov
 
 # Batch — all files, all presets
-mov2gif -q all *.mov
+gifframe -q all *.mov
 
 # Dark background matching VS Code / GitHub dark theme
-mov2gif -b "30,30,46" session.mov
+gifframe -b "30,30,46" session.mov
 
 # Exact hex colour
-mov2gif -b "#1e1e2e" session.mov
+gifframe -b "#1e1e2e" session.mov
 
 # Transparent background (no shadow; useful when embedding in dark UIs)
-mov2gif -b transparent session.mov
+gifframe -b transparent session.mov
 ```
 
 ---
@@ -199,17 +199,17 @@ The Docker image is published to the GitHub Container Registry on every push to
 
 ```bash
 # Pull latest
-docker pull ghcr.io/addono/mov2gif:latest
+docker pull ghcr.io/addono/gifframe:latest
 
 # Run (mounts current directory as /work inside the container)
-docker run --rm -v "$(pwd):/work" ghcr.io/addono/mov2gif [OPTIONS] [FILE...]
+docker run --rm -v "$(pwd):/work" ghcr.io/addono/gifframe [OPTIONS] [FILE...]
 ```
 
 ### Building locally
 
 ```bash
-docker build -t mov2gif .
-docker run --rm -v "$(pwd):/work" mov2gif -q high demo.mov
+docker build -t gifframe .
+docker run --rm -v "$(pwd):/work" gifframe -q high demo.mov
 ```
 
 ---
@@ -234,13 +234,13 @@ bats tests/
 ### Project layout
 
 ```
-mov2gif/
+gifframe/
 ├── bin/
-│   └── mov2gif          # Main conversion script (bash + python3 heredoc)
+│   └── gifframe         # Main conversion script (bash + python3 heredoc)
 ├── docs/
 │   └── demo.gif         # Demo used in this README
 ├── tests/
-│   └── test_mov2gif.bats
+│   └── test_gifframe.bats
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml       # Lint + test + Docker build on every PR

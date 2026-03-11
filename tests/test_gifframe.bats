@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# bats tests for mov2gif
+# bats tests for gifframe
 # Each test that produces output cleans up after itself.
 
 setup() {
@@ -9,7 +9,7 @@ setup() {
 
     # Locate the script (repo root relative to this file)
     SCRIPT_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
-    MOV2GIF="$SCRIPT_DIR/bin/mov2gif"
+    MOV2GIF="$SCRIPT_DIR/bin/gifframe"
 
     # ImageMagick v7 exposes a unified 'magick' binary; v6 (Ubuntu/apt) uses
     # separate 'identify' and 'convert' binaries.

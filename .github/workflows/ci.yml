@@ -16,8 +16,8 @@ jobs:
       - name: Install ShellCheck
         run: sudo apt-get install -y shellcheck
 
-      - name: Lint bin/mov2gif
-        run: shellcheck bin/mov2gif
+      - name: Lint bin/gifframe
+        run: shellcheck bin/gifframe
 
   test:
     name: Tests (bats)
@@ -41,13 +41,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build image
-        run: docker build -t mov2gif:ci .
+        run: docker build -t gifframe:ci .
 
       - name: Install ffmpeg for test video generation
         run: sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Verify help flag
-        run: docker run --rm mov2gif:ci --help
+        run: docker run --rm gifframe:ci --help
 
       - name: Smoke test conversion
         run: |
@@ -62,7 +62,7 @@ jobs:
           mkdir -p /tmp/out
           docker run --rm \
             -v /tmp:/work \
-            mov2gif:ci -q medium /work/test.mov
+            gifframe:ci -q medium /work/test.mov
 
           ls /tmp/gifs/test_medium.gif
           echo "✓ Docker smoke test passed"
