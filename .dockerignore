@@ -1,0 +1,10 @@
+.git
+.gitignore
+*.md
+docs/
+tests/
+gifs/
+tmp/
+.DS_Store
+.vscode/
+.idea/

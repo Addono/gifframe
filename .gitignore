@@ -1,0 +1,27 @@
+# Output
+gifs/
+
+# Temporary directories
+tmp/
+*.tmp
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.python-version
+
+# Test artifacts
+tests/tmp/
