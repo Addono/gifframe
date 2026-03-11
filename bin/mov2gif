@@ -72,13 +72,21 @@ usage() {
     echo "                           high    – 12 fps, 1024 px wide, 128 colors  ← default"
     echo "                           xhigh   – 20 fps, 1024 px wide, 256 colors"
     echo "                           all     – render all three presets"
+    echo "  -b, --background COLOR Background color (default: white)"
+    echo "                           CSS name : white, black, \"#1e1e1e\""
+    echo "                           R,G,B    : 30,30,30"
+    echo "                           R,G,B,A  : 0,0,0,128  (A<128 → transparent)"
+    echo "                           transparent / none  → transparent GIF"
     echo "  -h, --help             Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $(basename "$0")                          # convert all .mov, high quality"
-    echo "  $(basename "$0") demo.mov                 # convert one file, high quality"
-    echo "  $(basename "$0") -q xhigh demo.mov        # xhigh quality"
-    echo "  $(basename "$0") -q all *.mov             # all files, all presets"
+    echo "  $(basename "$0")                              # convert all .mov, high quality"
+    echo "  $(basename "$0") demo.mov                     # convert one file, high quality"
+    echo "  $(basename "$0") -q xhigh demo.mov            # xhigh quality"
+    echo "  $(basename "$0") -q all *.mov                 # all files, all presets"
+    echo "  $(basename "$0") -b black demo.mov            # dark background"
+    echo "  $(basename "$0") -b 30,30,46 demo.mov         # custom dark-blue background"
+    echo "  $(basename "$0") -b transparent demo.mov      # transparent background (no shadow)"
 }
 
 # ── quality presets ───────────────────────────────────────────────────────────
@@ -115,16 +123,53 @@ get_description() {
     esac
 }
 
+# ── colour helpers ────────────────────────────────────────────────────────────
+
+# Normalize a user-supplied background colour to an ImageMagick-compatible
+# string, or the sentinel "transparent".
+#
+# Accepted inputs:
+#   transparent | none          → "transparent"
+#   R,G,B       (0–255 each)   → "#RRGGBB"
+#   R,G,B,A     (0–255 each)   → "#RRGGBB"  (A < 128 becomes "transparent")
+#   anything else               → passed through unchanged (CSS name, hex …)
+normalize_color() {
+    local c="$1"
+    case "$c" in
+        transparent|none)
+            printf 'transparent' ;;
+        [0-9]*,[0-9]*,[0-9]*,[0-9]*)
+            local _r _g _b _a
+            IFS=',' read -r _r _g _b _a <<< "$c"
+            if (( _a < 128 )); then
+                printf 'transparent'
+            else
+                printf '#%02X%02X%02X' "$_r" "$_g" "$_b"
+            fi ;;
+        [0-9]*,[0-9]*,[0-9]*)
+            local _r _g _b
+            IFS=',' read -r _r _g _b <<< "$c"
+            printf '#%02X%02X%02X' "$_r" "$_g" "$_b" ;;
+        *)
+            printf '%s' "$c" ;;
+    esac
+}
+
 # ── conversion ────────────────────────────────────────────────────────────────
 
 convert_mov_to_gif() {
     local mov_file="$1"
     local quality="$2"
+    local bg_color="$3"   # normalised colour or "transparent"
 
     local fps scale colors
     fps=$(get_preset_fps "$quality")
     scale=$(get_preset_scale "$quality")
     colors=$(get_preset_colors "$quality")
+
+    # Transparent mode: skip shadow, reserve GIF palette slot for transparency
+    local is_transparent="false"
+    [[ "$bg_color" == "transparent" ]] && is_transparent="true"
 
     local base_name output_file temp_dir
     base_name=$(basename "$mov_file" .mov)
@@ -148,8 +193,10 @@ convert_mov_to_gif() {
     #      black border is static across all frames of a terminal recording.
     #   3. Precompute the drop-shadow background image ONCE per quality level
     #      (the expensive Gaussian blur depends only on window shape, not content).
+    #      Skipped for transparent backgrounds.
     #   4. Apply mask + rounded corners + composite onto shadow bg in parallel
     #      via ThreadPoolExecutor (numpy releases the GIL; subprocess I/O overlaps).
+    BG_COLOR="$bg_color" IS_TRANSPARENT="$is_transparent" \
     MAGICK_CMD="$MAGICK_CMD" python3 << PYEOF
 import subprocess, os, glob
 import numpy as np
@@ -159,6 +206,8 @@ FUZZ     = 3    # per-channel BFS tolerance – stops at window chrome (~30 diff
 CORNER_R = 12   # macOS window corner radius in pixels
 WORKERS  = min(os.cpu_count() or 4, 16)
 MAGICK   = os.environ['MAGICK_CMD'].split()
+BG_COLOR      = os.environ.get('BG_COLOR', 'white')
+IS_TRANSPARENT = os.environ.get('IS_TRANSPARENT', 'false') == 'true'
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -248,8 +297,11 @@ def compute_alpha(w, h, vis2d, wx1, wy1, wx2, wy2):
 # Shadow parameters analytically fitted to a macOS reference screenshot:
 #   opacity=70 %, sigma=20 px, x-offset=0, y-offset=+18 px
 # alpha(d) = 0.70 * erfc(d / (20 * sqrt(2))) / 2  — verified Δ ≤ 5/255
+# Skipped for transparent output (no background to shadow onto).
 
 def create_shadow_bg(w, h, alpha, out_path):
+    if IS_TRANSPARENT:
+        return
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
     rgba[:, :, 3] = alpha                   # black silhouette; only alpha needed
     pam = pam_header(w, h) + rgba.tobytes()
@@ -257,7 +309,7 @@ def create_shadow_bg(w, h, alpha, out_path):
         MAGICK + ['pam:-',
                   '(', '+clone', '-background', 'black', '-shadow', '70x20+0+18', ')',
                   '-delete', '0',
-                  '-background', 'white', '-flatten',
+                  '-background', BG_COLOR, '-flatten',
                   '-extent', f'{w}x{h}',
                   '-type', 'TrueColor',   # force RGB PNG — shadow is grayscale-valued but
                   out_path],              # must stay sRGB so frame composites keep colour
@@ -273,10 +325,17 @@ def process_frame(args):
     rgba[:, :, :3] = rgb
     rgba[:, :,  3] = alpha
     out_png = path.replace('.ppm', '.png')
-    subprocess.run(
-        MAGICK + [shadow_bg, '-colorspace', 'sRGB', 'pam:-', '-composite', out_png],
-        input=pam_header(w, h) + rgba.tobytes(), capture_output=True, check=True
-    )
+    if IS_TRANSPARENT:
+        # Write RGBA directly — background pixels already have alpha=0 from BFS
+        subprocess.run(
+            MAGICK + ['pam:-', out_png],
+            input=pam_header(w, h) + rgba.tobytes(), capture_output=True, check=True
+        )
+    else:
+        subprocess.run(
+            MAGICK + [shadow_bg, '-colorspace', 'sRGB', 'pam:-', '-composite', out_png],
+            input=pam_header(w, h) + rgba.tobytes(), capture_output=True, check=True
+        )
 
 # ── run ───────────────────────────────────────────────────────────────────────
 
@@ -284,7 +343,7 @@ frames = sorted(glob.glob('$temp_dir/frame_*.ppm'))
 if frames:
     w, h, vis2d, wx1, wy1, wx2, wy2 = compute_mask(frames[0])
     alpha     = compute_alpha(w, h, vis2d, wx1, wy1, wx2, wy2)
-    shadow_bg = '$temp_dir/shadow_bg.png'
+    shadow_bg = None if IS_TRANSPARENT else '$temp_dir/shadow_bg.png'
     create_shadow_bg(w, h, alpha, shadow_bg)
     task_args = [(f, alpha, shadow_bg, w, h) for f in frames]
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
@@ -292,11 +351,19 @@ if frames:
 PYEOF
 
     # Step 2 – assemble processed PNGs into an optimised GIF with a custom palette
+    local pal_opts
+    if [[ "$is_transparent" == "true" ]]; then
+        # Reserve one palette slot for transparency; treat alpha < 128 as transparent
+        pal_opts="split=[p][s];[p]palettegen=max_colors=$((colors-1)):reserve_transparent=1[pal];[s][pal]paletteuse=alpha_threshold=128:dither=0"
+    else
+        pal_opts="split=[p][s];[p]palettegen=max_colors=${colors}[pal];[s][pal]paletteuse=dither=0"
+    fi
+
     ffmpeg -y -hide_banner -loglevel warning \
         -framerate "$fps" \
         -pattern_type glob \
         -i "$temp_dir/frame_*.png" \
-        -vf "split=[p][s];[p]palettegen=max_colors=${colors}[pal];[s][pal]paletteuse=dither=0" \
+        -vf "$pal_opts" \
         -loop 0 \
         "$output_file" 2>/dev/null
 
@@ -311,6 +378,7 @@ PYEOF
 
 main() {
     local quality="high"
+    local background="white"
     local -a specified_files=()
 
     # ── argument parsing ─────────────────────────────────────────────────────
@@ -322,6 +390,12 @@ main() {
                     usage; exit 1
                 fi
                 quality="$2"; shift 2 ;;
+            -b|--background)
+                if [[ -z "${2-}" ]]; then
+                    echo -e "${RED}Error: --background requires an argument${NC}" >&2
+                    usage; exit 1
+                fi
+                background="$2"; shift 2 ;;
             -h|--help)
                 usage; exit 0 ;;
             -*)
@@ -334,6 +408,10 @@ main() {
                 shift ;;
         esac
     done
+
+    # ── normalise background colour ───────────────────────────────────────────
+    local bg_color
+    bg_color="$(normalize_color "$background")"
 
     # ── validate quality ─────────────────────────────────────────────────────
     local -a quality_list=()
@@ -378,6 +456,7 @@ main() {
     echo ""
     echo "  Files:   ${#mov_files[@]} file(s)"
     echo "  Quality: ${quality_list[*]}"
+    echo "  Background: $bg_color"
     echo "  Output:  $OUTPUT_DIR"
     echo ""
 
@@ -385,7 +464,7 @@ main() {
     for mov_file in "${mov_files[@]}"; do
         echo -e "${YELLOW}▶ $(basename "$mov_file")${NC}"
         for preset in "${quality_list[@]}"; do
-            convert_mov_to_gif "$mov_file" "$preset"
+            convert_mov_to_gif "$mov_file" "$preset" "$bg_color"
         done
         echo ""
     done

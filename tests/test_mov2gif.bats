@@ -186,3 +186,84 @@ make_test_mov() {
     # File was touched again (mtime changed or same — just must not error)
     [ -f "gifs/ow_medium.gif" ]
 }
+
+# ── --background flag tests ───────────────────────────────────────────────────
+
+@test "--background requires an argument" {
+    run "$MOV2GIF" --background
+    [ "$status" -ne 0 ]
+}
+
+@test "--background white produces white corners (default behaviour)" {
+    make_test_mov "bg_white.mov"
+    run "$MOV2GIF" -q medium --background white bg_white.mov
+    [ "$status" -eq 0 ]
+    local corner
+    corner=$(magick identify -format \
+        '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' \
+        gifs/bg_white_medium.gif)
+    [ "$corner" = "255,255,255" ]
+}
+
+@test "--background black produces dark corners" {
+    make_test_mov "bg_black.mov"
+    run "$MOV2GIF" -q medium --background black bg_black.mov
+    [ "$status" -eq 0 ]
+    # Corner should be black (or very close) — not white
+    local r g b
+    IFS=',' read -r r g b <<< "$(magick identify -format \
+        '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' \
+        gifs/bg_black_medium.gif)"
+    # All channels should be < 128 (dark)
+    (( r < 128 && g < 128 && b < 128 ))
+}
+
+@test "--background R,G,B sets corner to exact colour" {
+    make_test_mov "bg_rgb.mov"
+    run "$MOV2GIF" -q medium --background "30,30,46" bg_rgb.mov
+    [ "$status" -eq 0 ]
+    local corner
+    corner=$(magick identify -format \
+        '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' \
+        gifs/bg_rgb_medium.gif)
+    [ "$corner" = "30,30,46" ]
+}
+
+@test "--background R,G,B,A with A>=128 uses the RGB part" {
+    make_test_mov "bg_rgba_opaque.mov"
+    run "$MOV2GIF" -q medium --background "30,30,46,255" bg_rgba_opaque.mov
+    [ "$status" -eq 0 ]
+    local corner
+    corner=$(magick identify -format \
+        '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' \
+        gifs/bg_rgba_opaque_medium.gif)
+    [ "$corner" = "30,30,46" ]
+}
+
+@test "--background transparent produces transparent corners" {
+    make_test_mov "bg_transp.mov"
+    run "$MOV2GIF" -q medium --background transparent bg_transp.mov
+    [ "$status" -eq 0 ]
+    local alpha
+    alpha=$(magick identify -format '%[fx:p{0,0}.a*255]' gifs/bg_transp_medium.gif)
+    # Corner pixel should have alpha = 0 (fully transparent)
+    (( $(printf '%.0f' "$alpha") == 0 ))
+}
+
+@test "--background none is an alias for transparent" {
+    make_test_mov "bg_none.mov"
+    run "$MOV2GIF" -q medium --background none bg_none.mov
+    [ "$status" -eq 0 ]
+    local alpha
+    alpha=$(magick identify -format '%[fx:p{0,0}.a*255]' gifs/bg_none_medium.gif)
+    (( $(printf '%.0f' "$alpha") == 0 ))
+}
+
+@test "--background R,G,B,A with A<128 produces transparent corners" {
+    make_test_mov "bg_rgba_transp.mov"
+    run "$MOV2GIF" -q medium --background "255,255,255,0" bg_rgba_transp.mov
+    [ "$status" -eq 0 ]
+    local alpha
+    alpha=$(magick identify -format '%[fx:p{0,0}.a*255]' gifs/bg_rgba_transp_medium.gif)
+    (( $(printf '%.0f' "$alpha") == 0 ))
+}

@@ -93,6 +93,11 @@ Options:
                            high    – 12 fps, 1024 px wide, 128 colors  ← default
                            xhigh   – 20 fps, 1024 px wide, 256 colors
                            all     – render all three presets
+  -b, --background COLOR Background color (default: white)
+                           CSS name      white, black, "#1e1e2e"
+                           R,G,B         30,30,46
+                           R,G,B,A       0,0,0,128  (A < 128 → transparent)
+                           transparent / none  → transparent GIF (no shadow)
   -h, --help             Show this help message
 ```
 
@@ -113,6 +118,15 @@ mov2gif -q medium session.mov
 
 # Batch — all files, all presets
 mov2gif -q all *.mov
+
+# Dark background matching VS Code / GitHub dark theme
+mov2gif -b "30,30,46" session.mov
+
+# Exact hex colour
+mov2gif -b "#1e1e2e" session.mov
+
+# Transparent background (no shadow; useful when embedding in dark UIs)
+mov2gif -b transparent session.mov
 ```
 
 ---
