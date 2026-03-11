@@ -1,0 +1,401 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+#
+# mov2gif — Convert terminal screen recordings (.mov) to optimised animated GIFs
+#
+# Produces macOS-style output: white background, rounded window corners,
+# and a soft drop shadow — sized to match a real macOS window chrome.
+#
+# Usage: mov2gif [OPTIONS] [FILE...]
+#   FILE                 .mov files to convert (default: all *.mov in current dir)
+#   -q, --quality PRESET Quality preset: medium | high | xhigh | all (default: high)
+#   -h, --help           Show this help
+
+set -euo pipefail
+
+OUTPUT_DIR="$(pwd)/gifs"
+mkdir -p "$OUTPUT_DIR"
+
+# ── colours ──────────────────────────────────────────────────────────────────
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# ── dependency detection ─────────────────────────────────────────────────────
+
+check_dependencies() {
+    local missing=()
+
+    if ! command -v ffmpeg &>/dev/null; then
+        missing+=("ffmpeg")
+    fi
+
+    if command -v magick &>/dev/null; then
+        export MAGICK_CMD="magick"
+    elif command -v convert &>/dev/null; then
+        export MAGICK_CMD="convert"
+    else
+        missing+=("imagemagick")
+    fi
+
+    if ! command -v python3 &>/dev/null; then
+        missing+=("python3")
+    elif ! python3 -c "import numpy" &>/dev/null; then
+        missing+=("python3-numpy")
+    fi
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo -e "${RED}Error: Missing dependencies: ${missing[*]}${NC}" >&2
+        echo "" >&2
+        echo "Install on macOS:  brew install ffmpeg imagemagick numpy" >&2
+        echo "Install on Ubuntu: apt install ffmpeg imagemagick python3 python3-numpy" >&2
+        exit 1
+    fi
+}
+
+# ── help ─────────────────────────────────────────────────────────────────────
+
+usage() {
+    echo "Usage: $(basename "$0") [OPTIONS] [FILE...]"
+    echo ""
+    echo "Convert .mov screen recordings to optimised GIFs with macOS-style chrome."
+    echo ""
+    echo "Arguments:"
+    echo "  FILE                   .mov file(s) to convert."
+    echo "                         Defaults to all *.mov in current directory."
+    echo ""
+    echo "Options:"
+    echo "  -q, --quality PRESET   Quality preset (default: high)"
+    echo "                           medium  – 15 fps, 640 px wide,  128 colors"
+    echo "                           high    – 12 fps, 1024 px wide, 128 colors  ← default"
+    echo "                           xhigh   – 20 fps, 1024 px wide, 256 colors"
+    echo "                           all     – render all three presets"
+    echo "  -h, --help             Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $(basename "$0")                          # convert all .mov, high quality"
+    echo "  $(basename "$0") demo.mov                 # convert one file, high quality"
+    echo "  $(basename "$0") -q xhigh demo.mov        # xhigh quality"
+    echo "  $(basename "$0") -q all *.mov             # all files, all presets"
+}
+
+# ── quality presets ───────────────────────────────────────────────────────────
+
+get_preset_fps() {
+    case "$1" in
+        medium) echo "15" ;;
+        high)   echo "12" ;;
+        xhigh)  echo "20" ;;
+    esac
+}
+
+get_preset_scale() {
+    case "$1" in
+        medium) echo "640" ;;
+        high)   echo "1024" ;;
+        xhigh)  echo "1024" ;;
+    esac
+}
+
+get_preset_colors() {
+    case "$1" in
+        medium) echo "128" ;;
+        high)   echo "128" ;;
+        xhigh)  echo "256" ;;
+    esac
+}
+
+get_description() {
+    case "$1" in
+        medium) echo "medium  (15 fps · 640 px · 128 colors)" ;;
+        high)   echo "high    (12 fps · 1024 px · 128 colors)" ;;
+        xhigh)  echo "xhigh   (20 fps · 1024 px · 256 colors)" ;;
+    esac
+}
+
+# ── conversion ────────────────────────────────────────────────────────────────
+
+convert_mov_to_gif() {
+    local mov_file="$1"
+    local quality="$2"
+
+    local fps scale colors
+    fps=$(get_preset_fps "$quality")
+    scale=$(get_preset_scale "$quality")
+    colors=$(get_preset_colors "$quality")
+
+    local base_name output_file temp_dir
+    base_name=$(basename "$mov_file" .mov)
+    output_file="$OUTPUT_DIR/${base_name}_${quality}.gif"
+    temp_dir=$(mktemp -d)
+
+    echo -e "${BLUE}Converting:${NC} $(basename "$mov_file") → $(get_description "$quality")"
+
+    # Step 1 – extract frames as raw PPM (avoids per-frame magick decode)
+    ffmpeg -y -hide_banner -loglevel warning \
+        -i "$mov_file" \
+        -vf "fps=$fps,scale=$scale:-1:flags=lanczos" \
+        -f image2 -vcodec ppm \
+        "$temp_dir/frame_%06d.ppm" 2>/dev/null
+
+    echo -e "  ${BLUE}Preprocessing frames (BFS mask · rounded corners · shadow)…${NC}"
+
+    # Speed optimisation strategy:
+    #   1. Extract frames as raw PPM — no per-frame magick decode step.
+    #   2. Compute the BFS background mask ONCE from the first frame; the outer
+    #      black border is static across all frames of a terminal recording.
+    #   3. Precompute the drop-shadow background image ONCE per quality level
+    #      (the expensive Gaussian blur depends only on window shape, not content).
+    #   4. Apply mask + rounded corners + composite onto shadow bg in parallel
+    #      via ThreadPoolExecutor (numpy releases the GIL; subprocess I/O overlaps).
+    MAGICK_CMD="$MAGICK_CMD" python3 << PYEOF
+import subprocess, os, glob
+import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+
+FUZZ     = 3    # per-channel BFS tolerance – stops at window chrome (~30 diff)
+CORNER_R = 12   # macOS window corner radius in pixels
+WORKERS  = min(os.cpu_count() or 4, 16)
+MAGICK   = os.environ['MAGICK_CMD'].split()
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def read_ppm(path):
+    """Return (w, h, uint8 numpy array shape (h, w, 3))."""
+    with open(path, 'rb') as fh:
+        data = fh.read()
+    pos = 0; newlines = 0
+    while newlines < 3:
+        if data[pos] == 10: newlines += 1   # ord('\n')
+        pos += 1
+    parts = data[:pos].decode().split()
+    w, h = int(parts[1]), int(parts[2])
+    return w, h, np.frombuffer(data[pos:pos + w*h*3], dtype=np.uint8).reshape(h, w, 3).copy()
+
+def pam_header(w, h):
+    return f'P7\nWIDTH {w}\nHEIGHT {h}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n'.encode()
+
+# ── step 1: BFS background mask (computed once) ───────────────────────────────
+# Seeds from every edge pixel; propagates through pixels within FUZZ of their
+# neighbour.  The macOS desktop background is pure black (#000000) — identical
+# to the terminal window background — but the title bar chrome (~#1E2023, diff
+# ~30) stops the flood fill at the window boundary.
+
+def compute_mask(path):
+    """Returns (w, h, visited uint8 ndarray (h,w), wx1, wy1, wx2, wy2)."""
+    w, h, rgb = read_ppm(path)
+    flat     = rgb.reshape(-1, 3)
+    visited  = np.zeros(w * h, dtype=np.uint8)
+    queue    = []
+
+    def seed(idx):
+        if not visited[idx]:
+            visited[idx] = 1
+            queue.append(idx)
+
+    for x in range(w):
+        seed(x); seed((h - 1) * w + x)
+    for y in range(1, h - 1):
+        seed(y * w); seed(y * w + w - 1)
+
+    head = 0
+    while head < len(queue):
+        idx  = queue[head]; head += 1
+        x_, y_ = idx % w, idx // w
+        pr, pg, pb = flat[idx, 0], flat[idx, 1], flat[idx, 2]
+        for nx, ny in ((x_-1,y_),(x_+1,y_),(x_,y_-1),(x_,y_+1)):
+            if 0 <= nx < w and 0 <= ny < h:
+                nidx = ny * w + nx
+                if not visited[nidx]:
+                    nr, ng, nb = flat[nidx,0], flat[nidx,1], flat[nidx,2]
+                    if (abs(int(pr)-nr) <= FUZZ and
+                        abs(int(pg)-ng) <= FUZZ and
+                        abs(int(pb)-nb) <= FUZZ):
+                        visited[nidx] = 1
+                        queue.append(nidx)
+
+    vis2d = visited.reshape(h, w)
+    rows, cols = np.where(vis2d == 0)
+    wx1, wx2 = int(cols.min()), int(cols.max())
+    wy1, wy2 = int(rows.min()), int(rows.max())
+    return w, h, vis2d, wx1, wy1, wx2, wy2
+
+# ── step 2: alpha mask (vectorised, computed once) ────────────────────────────
+# Encodes the window shape with anti-aliased r=12 rounded corners matching the
+# macOS window chrome measured analytically from a reference screenshot.
+
+def compute_alpha(w, h, vis2d, wx1, wy1, wx2, wy2):
+    """Returns uint8 ndarray (h, w) — 255 inside window, 0 outside."""
+    xs = np.tile(np.arange(w, dtype=np.int32), (h, 1))
+    ys = np.repeat(np.arange(h, dtype=np.int32)[:, None], w, axis=1)
+
+    outside   = (vis2d > 0) | (xs < wx1) | (xs > wx2) | (ys < wy1) | (ys > wy2)
+    il        = xs < wx1 + CORNER_R;  ir = xs > wx2 - CORNER_R
+    it        = ys < wy1 + CORNER_R;  ib = ys > wy2 - CORNER_R
+    in_corner = (il | ir) & (it | ib)
+
+    cx   = np.where(il, wx1 + CORNER_R, wx2 - CORNER_R).astype(np.float32)
+    cy   = np.where(it, wy1 + CORNER_R, wy2 - CORNER_R).astype(np.float32)
+    dist = np.sqrt((xs.astype(np.float32) - cx)**2 + (ys.astype(np.float32) - cy)**2)
+    ca   = np.clip(((CORNER_R + 0.5 - dist) * 255).astype(np.int32), 0, 255).astype(np.uint8)
+
+    return np.where(outside, np.uint8(0),
+           np.where(in_corner, ca, np.uint8(255))).astype(np.uint8)
+
+# ── step 3: shadow background (computed once) ────────────────────────────────
+# Shadow parameters analytically fitted to a macOS reference screenshot:
+#   opacity=70 %, sigma=20 px, x-offset=0, y-offset=+18 px
+# alpha(d) = 0.70 * erfc(d / (20 * sqrt(2))) / 2  — verified Δ ≤ 5/255
+
+def create_shadow_bg(w, h, alpha, out_path):
+    rgba = np.zeros((h, w, 4), dtype=np.uint8)
+    rgba[:, :, 3] = alpha                   # black silhouette; only alpha needed
+    pam = pam_header(w, h) + rgba.tobytes()
+    subprocess.run(
+        MAGICK + ['pam:-',
+                  '(', '+clone', '-background', 'black', '-shadow', '70x20+0+18', ')',
+                  '-delete', '0',
+                  '-background', 'white', '-flatten',
+                  '-extent', f'{w}x{h}',
+                  '-type', 'TrueColor',   # force RGB PNG — shadow is grayscale-valued but
+                  out_path],              # must stay sRGB so frame composites keep colour
+        input=pam, capture_output=True, check=True
+    )
+
+# ── step 4: per-frame composite (cheap — no blur) ────────────────────────────
+
+def process_frame(args):
+    path, alpha, shadow_bg, w, h = args
+    _, _, rgb = read_ppm(path)
+    rgba = np.empty((h, w, 4), dtype=np.uint8)
+    rgba[:, :, :3] = rgb
+    rgba[:, :,  3] = alpha
+    out_png = path.replace('.ppm', '.png')
+    subprocess.run(
+        MAGICK + [shadow_bg, '-colorspace', 'sRGB', 'pam:-', '-composite', out_png],
+        input=pam_header(w, h) + rgba.tobytes(), capture_output=True, check=True
+    )
+
+# ── run ───────────────────────────────────────────────────────────────────────
+
+frames = sorted(glob.glob('$temp_dir/frame_*.ppm'))
+if frames:
+    w, h, vis2d, wx1, wy1, wx2, wy2 = compute_mask(frames[0])
+    alpha     = compute_alpha(w, h, vis2d, wx1, wy1, wx2, wy2)
+    shadow_bg = '$temp_dir/shadow_bg.png'
+    create_shadow_bg(w, h, alpha, shadow_bg)
+    task_args = [(f, alpha, shadow_bg, w, h) for f in frames]
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        list(ex.map(process_frame, task_args))
+PYEOF
+
+    # Step 2 – assemble processed PNGs into an optimised GIF with a custom palette
+    ffmpeg -y -hide_banner -loglevel warning \
+        -framerate "$fps" \
+        -pattern_type glob \
+        -i "$temp_dir/frame_*.png" \
+        -vf "split=[p][s];[p]palettegen=max_colors=${colors}[pal];[s][pal]paletteuse=dither=0" \
+        -loop 0 \
+        "$output_file" 2>/dev/null
+
+    rm -rf "$temp_dir"
+
+    local size
+    size=$(ls -lh "$output_file" | awk '{print $5}')
+    echo -e "  ${GREEN}✓ Created:${NC} $output_file (${size})"
+}
+
+# ── main ─────────────────────────────────────────────────────────────────────
+
+main() {
+    local quality="high"
+    local -a specified_files=()
+
+    # ── argument parsing ─────────────────────────────────────────────────────
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -q|--quality)
+                if [[ -z "${2-}" ]]; then
+                    echo -e "${RED}Error: --quality requires an argument${NC}" >&2
+                    usage; exit 1
+                fi
+                quality="$2"; shift 2 ;;
+            -h|--help)
+                usage; exit 0 ;;
+            -*)
+                echo -e "${RED}Unknown flag: $1${NC}" >&2
+                usage; exit 1 ;;
+            *.mov)
+                specified_files+=("$1"); shift ;;
+            *)
+                echo -e "${YELLOW}Warning: '$1' is not a .mov file, skipping${NC}" >&2
+                shift ;;
+        esac
+    done
+
+    # ── validate quality ─────────────────────────────────────────────────────
+    local -a quality_list=()
+    case "$quality" in
+        medium) quality_list=(medium) ;;
+        high)   quality_list=(high) ;;
+        xhigh)  quality_list=(xhigh) ;;
+        all)    quality_list=(medium high xhigh) ;;
+        *)
+            echo -e "${RED}Invalid quality '$quality'. Valid: medium | high | xhigh | all${NC}" >&2
+            usage; exit 1 ;;
+    esac
+
+    check_dependencies
+
+    # ── collect .mov files ───────────────────────────────────────────────────
+    local -a mov_files=()
+    if [[ ${#specified_files[@]} -gt 0 ]]; then
+        for f in "${specified_files[@]}"; do
+            if [[ -f "$f" ]]; then
+                mov_files+=("$f")
+            else
+                echo -e "${YELLOW}Warning: '$f' not found, skipping${NC}" >&2
+            fi
+        done
+    else
+        while IFS= read -r -d '' file; do
+            mov_files+=("$file")
+        done < <(find . -maxdepth 1 -type f -name "*.mov" -print0 | sort -z)
+    fi
+
+    if [[ ${#mov_files[@]} -eq 0 ]]; then
+        echo -e "${YELLOW}No .mov files found. Pass files as arguments or run from a directory containing .mov files.${NC}" >&2
+        exit 1
+    fi
+
+    # ── banner ───────────────────────────────────────────────────────────────
+    echo ""
+    echo -e "${BLUE}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║       mov2gif  ·  terminal recorder      ║${NC}"
+    echo -e "${BLUE}╚══════════════════════════════════════════╝${NC}"
+    echo ""
+    echo "  Files:   ${#mov_files[@]} file(s)"
+    echo "  Quality: ${quality_list[*]}"
+    echo "  Output:  $OUTPUT_DIR"
+    echo ""
+
+    # ── convert ──────────────────────────────────────────────────────────────
+    for mov_file in "${mov_files[@]}"; do
+        echo -e "${YELLOW}▶ $(basename "$mov_file")${NC}"
+        for preset in "${quality_list[@]}"; do
+            convert_mov_to_gif "$mov_file" "$preset"
+        done
+        echo ""
+    done
+
+    # ── summary ──────────────────────────────────────────────────────────────
+    echo -e "${BLUE}─────────────────────────────────────────────${NC}"
+    echo -e "${GREEN}Done!${NC}  Output in $OUTPUT_DIR"
+    echo ""
+    ls -lh "$OUTPUT_DIR"/*.gif 2>/dev/null | awk '{printf "  %-50s %6s\n", $9, $5}' || true
+    echo ""
+}
+
+main "$@"
