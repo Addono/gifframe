@@ -128,15 +128,16 @@ make_test_mov() {
     run "$MOV2GIF" -q medium bg.mov
     [ "$status" -eq 0 ]
     local tl tr bl br
-    tl=$($MAGICK_IDENTIFY -format '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' gifs/bg_medium.gif)
-    tr=$($MAGICK_IDENTIFY -format '%[fx:p{w-1,0}.r*255],%[fx:p{w-1,0}.g*255],%[fx:p{w-1,0}.b*255]' gifs/bg_medium.gif)
-    bl=$($MAGICK_IDENTIFY -format '%[fx:p{0,h-1}.r*255],%[fx:p{0,h-1}.g*255],%[fx:p{0,h-1}.b*255]' gifs/bg_medium.gif)
-    br=$($MAGICK_IDENTIFY -format '%[fx:p{w-1,h-1}.r*255],%[fx:p{w-1,h-1}.g*255],%[fx:p{w-1,h-1}.b*255]' gifs/bg_medium.gif)
+    # [0] selects only the first frame — IM6 otherwise concatenates all frames
+    tl=$($MAGICK_IDENTIFY -format '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' 'gifs/bg_medium.gif[0]')
+    tr=$($MAGICK_IDENTIFY -format '%[fx:p{w-1,0}.r*255],%[fx:p{w-1,0}.g*255],%[fx:p{w-1,0}.b*255]' 'gifs/bg_medium.gif[0]')
+    bl=$($MAGICK_IDENTIFY -format '%[fx:p{0,h-1}.r*255],%[fx:p{0,h-1}.g*255],%[fx:p{0,h-1}.b*255]' 'gifs/bg_medium.gif[0]')
+    br=$($MAGICK_IDENTIFY -format '%[fx:p{w-1,h-1}.r*255],%[fx:p{w-1,h-1}.g*255],%[fx:p{w-1,h-1}.b*255]' 'gifs/bg_medium.gif[0]')
     # Round floats (IM6 may output "255.0") and accept >= 240 to allow for minor
     # shadow bleed differences between ImageMagick 6 and 7.
     for pixel in "$tl" "$tr" "$bl" "$br"; do
-        local r g b
-        IFS=',' read -r r g b <<< "$pixel"
+        local IFS=',' r g b
+        read -r r g b <<< "$pixel"
         r=$(printf '%.0f' "$r"); g=$(printf '%.0f' "$g"); b=$(printf '%.0f' "$b")
         (( r >= 240 && g >= 240 && b >= 240 ))
     done
@@ -215,8 +216,9 @@ make_test_mov() {
     local corner r g b
     corner=$($MAGICK_IDENTIFY -format \
         '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' \
-        gifs/bg_white_medium.gif)
-    IFS=',' read -r r g b <<< "$corner"
+        'gifs/bg_white_medium.gif[0]')
+    local IFS=','
+    read -r r g b <<< "$corner"
     r=$(printf '%.0f' "$r"); g=$(printf '%.0f' "$g"); b=$(printf '%.0f' "$b")
     (( r >= 240 && g >= 240 && b >= 240 ))
 }
@@ -227,9 +229,10 @@ make_test_mov() {
     [ "$status" -eq 0 ]
     # Corner should be black (or very close) — not white
     local r g b
-    IFS=',' read -r r g b <<< "$($MAGICK_IDENTIFY -format \
+    local IFS=',' r g b
+    read -r r g b <<< "$($MAGICK_IDENTIFY -format \
         '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' \
-        gifs/bg_black_medium.gif)"
+        'gifs/bg_black_medium.gif[0]')"
     # All channels should be < 128 (dark)
     (( r < 128 && g < 128 && b < 128 ))
 }
@@ -241,8 +244,9 @@ make_test_mov() {
     local corner r g b
     corner=$($MAGICK_IDENTIFY -format \
         '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' \
-        gifs/bg_rgb_medium.gif)
-    IFS=',' read -r r g b <<< "$corner"
+        'gifs/bg_rgb_medium.gif[0]')
+    local IFS=','
+    read -r r g b <<< "$corner"
     r=$(printf '%.0f' "$r"); g=$(printf '%.0f' "$g"); b=$(printf '%.0f' "$b")
     # Accept ±15 per channel — IM6 shadow compositing may shift values slightly
     (( r >= 15 && r <= 45 && g >= 15 && g <= 45 && b >= 31 && b <= 61 ))
@@ -255,8 +259,9 @@ make_test_mov() {
     local corner r g b
     corner=$($MAGICK_IDENTIFY -format \
         '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' \
-        gifs/bg_rgba_opaque_medium.gif)
-    IFS=',' read -r r g b <<< "$corner"
+        'gifs/bg_rgba_opaque_medium.gif[0]')
+    local IFS=','
+    read -r r g b <<< "$corner"
     r=$(printf '%.0f' "$r"); g=$(printf '%.0f' "$g"); b=$(printf '%.0f' "$b")
     (( r >= 15 && r <= 45 && g >= 15 && g <= 45 && b >= 31 && b <= 61 ))
 }
@@ -266,7 +271,7 @@ make_test_mov() {
     run "$MOV2GIF" -q medium --background transparent bg_transp.mov
     [ "$status" -eq 0 ]
     local alpha
-    alpha=$($MAGICK_IDENTIFY -format '%[fx:p{0,0}.a*255]' gifs/bg_transp_medium.gif)
+    alpha=$($MAGICK_IDENTIFY -format '%[fx:p{0,0}.a*255]' 'gifs/bg_transp_medium.gif[0]')
     # Corner pixel should have alpha = 0 (fully transparent)
     (( $(printf '%.0f' "$alpha") == 0 ))
 }
@@ -276,7 +281,7 @@ make_test_mov() {
     run "$MOV2GIF" -q medium --background none bg_none.mov
     [ "$status" -eq 0 ]
     local alpha
-    alpha=$($MAGICK_IDENTIFY -format '%[fx:p{0,0}.a*255]' gifs/bg_none_medium.gif)
+    alpha=$($MAGICK_IDENTIFY -format '%[fx:p{0,0}.a*255]' 'gifs/bg_none_medium.gif[0]')
     (( $(printf '%.0f' "$alpha") == 0 ))
 }
 
@@ -285,6 +290,6 @@ make_test_mov() {
     run "$MOV2GIF" -q medium --background "255,255,255,0" bg_rgba_transp.mov
     [ "$status" -eq 0 ]
     local alpha
-    alpha=$($MAGICK_IDENTIFY -format '%[fx:p{0,0}.a*255]' gifs/bg_rgba_transp_medium.gif)
+    alpha=$($MAGICK_IDENTIFY -format '%[fx:p{0,0}.a*255]' 'gifs/bg_rgba_transp_medium.gif[0]')
     (( $(printf '%.0f' "$alpha") == 0 ))
 }
