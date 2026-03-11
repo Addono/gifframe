@@ -370,7 +370,7 @@ PYEOF
     rm -rf "$temp_dir"
 
     local size
-    size=$(ls -lh "$output_file" | awk '{print $5}')
+    size=$(du -sh "$output_file" | cut -f1)
     echo -e "  ${GREEN}✓ Created:${NC} $output_file (${size})"
 }
 
@@ -473,7 +473,10 @@ main() {
     echo -e "${BLUE}─────────────────────────────────────────────${NC}"
     echo -e "${GREEN}Done!${NC}  Output in $OUTPUT_DIR"
     echo ""
-    ls -lh "$OUTPUT_DIR"/*.gif 2>/dev/null | awk '{printf "  %-50s %6s\n", $9, $5}' || true
+    find "$OUTPUT_DIR" -maxdepth 1 -name "*.gif" 2>/dev/null | sort | while IFS= read -r f; do
+        sz=$(du -sh "$f" | cut -f1)
+        printf "  %-50s %6s\n" "$f" "$sz"
+    done || true
     echo ""
 }
 

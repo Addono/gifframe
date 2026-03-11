@@ -10,6 +10,16 @@ setup() {
     # Locate the script (repo root relative to this file)
     SCRIPT_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
     MOV2GIF="$SCRIPT_DIR/bin/mov2gif"
+
+    # ImageMagick v7 exposes a unified 'magick' binary; v6 (Ubuntu/apt) uses
+    # separate 'identify' and 'convert' binaries.
+    if command -v magick &>/dev/null; then
+        MAGICK_IDENTIFY="magick identify"
+        MAGICK_CONVERT="magick convert"
+    else
+        MAGICK_IDENTIFY="identify"
+        MAGICK_CONVERT="convert"
+    fi
 }
 
 teardown() {
@@ -118,10 +128,10 @@ make_test_mov() {
     run "$MOV2GIF" -q medium bg.mov
     [ "$status" -eq 0 ]
     local tl tr bl br
-    tl=$(magick identify -format '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' gifs/bg_medium.gif)
-    tr=$(magick identify -format '%[fx:p{w-1,0}.r*255],%[fx:p{w-1,0}.g*255],%[fx:p{w-1,0}.b*255]' gifs/bg_medium.gif)
-    bl=$(magick identify -format '%[fx:p{0,h-1}.r*255],%[fx:p{0,h-1}.g*255],%[fx:p{0,h-1}.b*255]' gifs/bg_medium.gif)
-    br=$(magick identify -format '%[fx:p{w-1,h-1}.r*255],%[fx:p{w-1,h-1}.g*255],%[fx:p{w-1,h-1}.b*255]' gifs/bg_medium.gif)
+    tl=$($MAGICK_IDENTIFY -format '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' gifs/bg_medium.gif)
+    tr=$($MAGICK_IDENTIFY -format '%[fx:p{w-1,0}.r*255],%[fx:p{w-1,0}.g*255],%[fx:p{w-1,0}.b*255]' gifs/bg_medium.gif)
+    bl=$($MAGICK_IDENTIFY -format '%[fx:p{0,h-1}.r*255],%[fx:p{0,h-1}.g*255],%[fx:p{0,h-1}.b*255]' gifs/bg_medium.gif)
+    br=$($MAGICK_IDENTIFY -format '%[fx:p{w-1,h-1}.r*255],%[fx:p{w-1,h-1}.g*255],%[fx:p{w-1,h-1}.b*255]' gifs/bg_medium.gif)
     [ "$tl" = "255,255,255" ]
     [ "$tr" = "255,255,255" ]
     [ "$bl" = "255,255,255" ]
@@ -141,7 +151,7 @@ make_test_mov() {
     [ "$status" -eq 0 ]
 
     # Coalesce and check that at least one pixel has distinct R/G/B channels
-    magick convert gifs/colored_medium.gif -coalesce \
+    $MAGICK_CONVERT gifs/colored_medium.gif -coalesce \
         -define histogram:unique-colors=true \
         -format '%c' histogram:info: > /tmp/histo_$$.txt
     # grep for pixels where the hex colour has distinct channels
@@ -199,7 +209,7 @@ make_test_mov() {
     run "$MOV2GIF" -q medium --background white bg_white.mov
     [ "$status" -eq 0 ]
     local corner
-    corner=$(magick identify -format \
+    corner=$($MAGICK_IDENTIFY -format \
         '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' \
         gifs/bg_white_medium.gif)
     [ "$corner" = "255,255,255" ]
@@ -211,7 +221,7 @@ make_test_mov() {
     [ "$status" -eq 0 ]
     # Corner should be black (or very close) — not white
     local r g b
-    IFS=',' read -r r g b <<< "$(magick identify -format \
+    IFS=',' read -r r g b <<< "$($MAGICK_IDENTIFY -format \
         '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' \
         gifs/bg_black_medium.gif)"
     # All channels should be < 128 (dark)
@@ -223,7 +233,7 @@ make_test_mov() {
     run "$MOV2GIF" -q medium --background "30,30,46" bg_rgb.mov
     [ "$status" -eq 0 ]
     local corner
-    corner=$(magick identify -format \
+    corner=$($MAGICK_IDENTIFY -format \
         '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' \
         gifs/bg_rgb_medium.gif)
     [ "$corner" = "30,30,46" ]
@@ -234,7 +244,7 @@ make_test_mov() {
     run "$MOV2GIF" -q medium --background "30,30,46,255" bg_rgba_opaque.mov
     [ "$status" -eq 0 ]
     local corner
-    corner=$(magick identify -format \
+    corner=$($MAGICK_IDENTIFY -format \
         '%[fx:p{0,0}.r*255],%[fx:p{0,0}.g*255],%[fx:p{0,0}.b*255]' \
         gifs/bg_rgba_opaque_medium.gif)
     [ "$corner" = "30,30,46" ]
@@ -245,7 +255,7 @@ make_test_mov() {
     run "$MOV2GIF" -q medium --background transparent bg_transp.mov
     [ "$status" -eq 0 ]
     local alpha
-    alpha=$(magick identify -format '%[fx:p{0,0}.a*255]' gifs/bg_transp_medium.gif)
+    alpha=$($MAGICK_IDENTIFY -format '%[fx:p{0,0}.a*255]' gifs/bg_transp_medium.gif)
     # Corner pixel should have alpha = 0 (fully transparent)
     (( $(printf '%.0f' "$alpha") == 0 ))
 }
@@ -255,7 +265,7 @@ make_test_mov() {
     run "$MOV2GIF" -q medium --background none bg_none.mov
     [ "$status" -eq 0 ]
     local alpha
-    alpha=$(magick identify -format '%[fx:p{0,0}.a*255]' gifs/bg_none_medium.gif)
+    alpha=$($MAGICK_IDENTIFY -format '%[fx:p{0,0}.a*255]' gifs/bg_none_medium.gif)
     (( $(printf '%.0f' "$alpha") == 0 ))
 }
 
@@ -264,6 +274,6 @@ make_test_mov() {
     run "$MOV2GIF" -q medium --background "255,255,255,0" bg_rgba_transp.mov
     [ "$status" -eq 0 ]
     local alpha
-    alpha=$(magick identify -format '%[fx:p{0,0}.a*255]' gifs/bg_rgba_transp_medium.gif)
+    alpha=$($MAGICK_IDENTIFY -format '%[fx:p{0,0}.a*255]' gifs/bg_rgba_transp_medium.gif)
     (( $(printf '%.0f' "$alpha") == 0 ))
 }

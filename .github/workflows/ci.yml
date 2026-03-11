@@ -43,6 +43,9 @@ jobs:
       - name: Build image
         run: docker build -t mov2gif:ci .
 
+      - name: Install ffmpeg for test video generation
+        run: sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Verify help flag
         run: docker run --rm mov2gif:ci --help
 
