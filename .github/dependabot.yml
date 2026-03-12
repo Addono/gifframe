@@ -9,8 +9,7 @@ updates:
       day: sunday
       time: "03:00"
     commit-message:
-      prefix: "ci"
-      prefix-scope: "actions"
+      prefix: "ci: "
     reviewers:
       - Addono
-    auto-merge: true
+
