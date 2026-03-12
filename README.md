@@ -270,4 +270,4 @@ gifframe/
 
 ## License
 
-[MIT](LICENSE) © 2024 [Adriaan Knapen](https://aknapen.nl)
+[MIT](LICENSE) © 2026 [Adriaan Knapen](https://aknapen.nl)
