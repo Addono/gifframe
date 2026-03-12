@@ -1,0 +1,16 @@
+version: 2
+
+updates:
+  # Keep GitHub Actions up to date
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: sunday
+      time: "03:00"
+    commit-message:
+      prefix: "ci"
+      prefix-scope: "actions"
+    reviewers:
+      - Addono
+    auto-merge: true
