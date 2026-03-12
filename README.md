@@ -5,7 +5,7 @@
 > and a soft drop shadow.
 
 [![CI](https://github.com/Addono/gifframe/actions/workflows/ci.yml/badge.svg)](https://github.com/Addono/gifframe/actions/workflows/ci.yml)
-[![Docker](https://ghcr.io/Addono/gifframe)](https://github.com/Addono/gifframe/pkgs/container/gifframe)
+[![Docker](https://img.shields.io/badge/Docker-ghcr.io%2Faddono%2Fgifframe-2496ED?logo=docker&logoColor=white)](https://github.com/Addono/gifframe/pkgs/container/gifframe)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
