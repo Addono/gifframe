@@ -34,6 +34,12 @@
 
 ## Quick start
 
+### Pre-requisites
+
+Record a video of a terminal using MacOS' built-in screen recording tool. Set it to "Record Selected Window" mode. 
+
+The resulting screen-recording will have a border and black background. We will use this tool to remove that background, then re-apply a similar looking backdrop with a color of your choosing, e.g. white.
+
 ### Option 1 — Docker (recommended, no local setup)
 
 ```bash
