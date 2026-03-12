@@ -253,15 +253,15 @@ def compute_mask(path):
     while head < len(queue):
         idx  = queue[head]; head += 1
         x_, y_ = idx % w, idx // w
-        pr, pg, pb = flat[idx, 0], flat[idx, 1], flat[idx, 2]
+        pr, pg, pb = int(flat[idx, 0]), int(flat[idx, 1]), int(flat[idx, 2])
         for nx, ny in ((x_-1,y_),(x_+1,y_),(x_,y_-1),(x_,y_+1)):
             if 0 <= nx < w and 0 <= ny < h:
                 nidx = ny * w + nx
                 if not visited[nidx]:
-                    nr, ng, nb = flat[nidx,0], flat[nidx,1], flat[nidx,2]
-                    if (abs(int(pr)-nr) <= FUZZ and
-                        abs(int(pg)-ng) <= FUZZ and
-                        abs(int(pb)-nb) <= FUZZ):
+                    nr, ng, nb = int(flat[nidx,0]), int(flat[nidx,1]), int(flat[nidx,2])
+                    if (abs(pr-nr) <= FUZZ and
+                        abs(pg-ng) <= FUZZ and
+                        abs(pb-nb) <= FUZZ):
                         visited[nidx] = 1
                         queue.append(nidx)
 
